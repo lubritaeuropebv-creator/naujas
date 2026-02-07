@@ -7,12 +7,25 @@ Web-based application for analyzing promotional flyers and optimizing shopping
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
 import io
 import base64
 from pathlib import Path
+
+# Import plotly (optional - will fall back to matplotlib if not available)
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.warning("⚠️ Plotly not available. Install with: pip install plotly")
+    # Fallback to matplotlib
+    try:
+        import matplotlib.pyplot as plt
+        MATPLOTLIB_AVAILABLE = True
+    except ImportError:
+        MATPLOTLIB_AVAILABLE = False
 
 # Import our analyzer (will be in the same directory)
 try:
@@ -20,6 +33,7 @@ try:
     ANALYZER_AVAILABLE = True
 except ImportError:
     ANALYZER_AVAILABLE = False
+    st.error("⚠️ Backend analyzer not available. Make sure lt_promo_analyzer_enhanced.py is in the same directory.")
 
 # Page configuration
 st.set_page_config(
@@ -140,38 +154,46 @@ def create_retailer_comparison_chart(df):
     }).reset_index()
     retailer_stats.columns = ['Retailer', 'Products', 'Avg Discount %', 'Avg Price €']
     
-    fig = go.Figure()
-    
-    fig.add_trace(go.Bar(
-        name='Produktų skaičius',
-        x=retailer_stats['Retailer'],
-        y=retailer_stats['Products'],
-        marker_color='lightblue'
-    ))
-    
-    fig.update_layout(
-        title='Produktų skaičius pagal parduotuvę',
-        xaxis_title='Parduotuvė',
-        yaxis_title='Produktų skaičius',
-        height=400
-    )
-    
-    return fig
+    if PLOTLY_AVAILABLE:
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            name='Produktų skaičius',
+            x=retailer_stats['Retailer'],
+            y=retailer_stats['Products'],
+            marker_color='lightblue'
+        ))
+        
+        fig.update_layout(
+            title='Produktų skaičius pagal parduotuvę',
+            xaxis_title='Parduotuvė',
+            yaxis_title='Produktų skaičius',
+            height=400
+        )
+        
+        return fig
+    else:
+        # Fallback: return dataframe for table display
+        return retailer_stats
 
 
 def create_discount_distribution_chart(df):
     """Create discount distribution chart"""
-    fig = px.histogram(
-        df[df['is_promo']], 
-        x='discount_pct',
-        nbins=20,
-        title='Nuolaidų pasiskirstymas',
-        labels={'discount_pct': 'Nuolaidos dydis (%)', 'count': 'Dažnumas'},
-        color_discrete_sequence=['#2ecc71']
-    )
-    
-    fig.update_layout(height=400)
-    return fig
+    if PLOTLY_AVAILABLE:
+        fig = px.histogram(
+            df[df['is_promo']], 
+            x='discount_pct',
+            nbins=20,
+            title='Nuolaidų pasiskirstymas',
+            labels={'discount_pct': 'Nuolaidos dydis (%)', 'count': 'Dažnumas'},
+            color_discrete_sequence=['#2ecc71']
+        )
+        
+        fig.update_layout(height=400)
+        return fig
+    else:
+        # Fallback: return summary stats
+        return df[df['is_promo']]['discount_pct'].describe()
 
 
 def create_category_chart(df):
@@ -182,19 +204,23 @@ def create_category_chart(df):
     }).reset_index().sort_values('savings', ascending=False).head(10)
     category_stats.columns = ['Category', 'Total Savings', 'Count']
     
-    fig = px.bar(
-        category_stats,
-        x='Total Savings',
-        y='Category',
-        orientation='h',
-        title='Top 10 kategorijos pagal sutaupymus',
-        labels={'Total Savings': 'Sutaupymai (€)', 'Category': 'Kategorija'},
-        color='Total Savings',
-        color_continuous_scale='Greens'
-    )
-    
-    fig.update_layout(height=500)
-    return fig
+    if PLOTLY_AVAILABLE:
+        fig = px.bar(
+            category_stats,
+            x='Total Savings',
+            y='Category',
+            orientation='h',
+            title='Top 10 kategorijos pagal sutaupymus',
+            labels={'Total Savings': 'Sutaupymai (€)', 'Category': 'Kategorija'},
+            color='Total Savings',
+            color_continuous_scale='Greens'
+        )
+        
+        fig.update_layout(height=500)
+        return fig
+    else:
+        # Fallback: return dataframe
+        return category_stats
 
 
 def create_price_comparison_chart(df, search_term):
@@ -205,20 +231,24 @@ def create_price_comparison_chart(df, search_term):
     if filtered.empty:
         return None
     
-    fig = px.bar(
-        filtered,
-        x='final_price',
-        y='product_name',
-        color='retailer',
-        orientation='h',
-        title=f'Kainų palyginimas: {search_term}',
-        labels={'final_price': 'Kaina (€)', 'product_name': 'Produktas', 'retailer': 'Parduotuvė'},
-        text='final_price'
-    )
-    
-    fig.update_traces(texttemplate='%{text:.2f}€', textposition='outside')
-    fig.update_layout(height=400)
-    return fig
+    if PLOTLY_AVAILABLE:
+        fig = px.bar(
+            filtered,
+            x='final_price',
+            y='product_name',
+            color='retailer',
+            orientation='h',
+            title=f'Kainų palyginimas: {search_term}',
+            labels={'final_price': 'Kaina (€)', 'product_name': 'Produktas', 'retailer': 'Parduotuvė'},
+            text='final_price'
+        )
+        
+        fig.update_traces(texttemplate='%{text:.2f}€', textposition='outside')
+        fig.update_layout(height=400)
+        return fig
+    else:
+        # Fallback: return dataframe
+        return filtered[['product_name', 'retailer', 'final_price']]
 
 
 def main():
@@ -404,12 +434,25 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                st.plotly_chart(create_retailer_comparison_chart(df), use_container_width=True)
+                chart1 = create_retailer_comparison_chart(df)
+                if PLOTLY_AVAILABLE:
+                    st.plotly_chart(chart1, use_container_width=True)
+                else:
+                    st.dataframe(chart1, use_container_width=True)
             
             with col2:
-                st.plotly_chart(create_discount_distribution_chart(df), use_container_width=True)
+                chart2 = create_discount_distribution_chart(df)
+                if PLOTLY_AVAILABLE:
+                    st.plotly_chart(chart2, use_container_width=True)
+                else:
+                    st.write("**Discount Statistics:**")
+                    st.write(chart2)
             
-            st.plotly_chart(create_category_chart(df), use_container_width=True)
+            chart3 = create_category_chart(df)
+            if PLOTLY_AVAILABLE:
+                st.plotly_chart(chart3, use_container_width=True)
+            else:
+                st.dataframe(chart3, use_container_width=True)
             
             # Retailer details
             st.markdown("### 🏪 Detalesnė parduotuvių analizė")
@@ -490,8 +533,12 @@ def main():
                     
                     # Chart
                     fig = create_price_comparison_chart(df, search_term)
-                    if fig:
-                        st.plotly_chart(fig, use_container_width=True)
+                    if fig is not None:
+                        if PLOTLY_AVAILABLE:
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.markdown("#### Kainų palyginimas")
+                            st.dataframe(fig, use_container_width=True)
                     
                     # Table
                     st.markdown("#### Detali lentelė")
